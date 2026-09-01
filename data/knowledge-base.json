@@ -1,0 +1,22 @@
+[
+  { "category": "Check-in", "question": "What time is check-in?", "answer": "Check-in is from 3:00 PM. Early check-in may be available on request." },
+  { "category": "Check-out", "question": "What time is check-out?", "answer": "Check-out is by 11:00 AM." },
+  { "category": "Wifi", "question": "Is there wifi?", "answer": "Free wifi is available throughout the hotel. Network: HotelGuest, no password needed." },
+  { "category": "Parking", "question": "Is parking available?", "answer": "Yes, self-parking is $15/night. Valet is $25/night." },
+  { "category": "Rates", "question": "What are your room rates?", "answer": "Standard rooms start at $120/night, deluxe rooms at $180/night, subject to season and availability." },
+  { "category": "Policy", "question": "What is your cancellation policy?", "answer": "Free cancellation up to 48 hours before check-in. Cancellations within 48 hours are charged one night's rate." },
+  { "category": "Amenities", "question": "What amenities does the hotel offer?", "answer": "The hotel features an outdoor pool, 24-hour fitness center, business center, and on-site laundry." },
+  { "category": "Pool", "question": "What are the pool hours?", "answer": "The outdoor pool is open daily from 7:00 AM to 10:00 PM." },
+  { "category": "Breakfast", "question": "Is breakfast included?", "answer": "A complimentary continental breakfast is served daily from 6:30 AM to 10:00 AM in the lobby lounge." },
+  { "category": "Pets", "question": "Is the hotel pet-friendly?", "answer": "Yes, pets under 50 lbs are welcome for a one-time fee of $50 per stay. Please notify us in advance." },
+  { "category": "Airport Shuttle", "question": "Do you offer airport shuttle service?", "answer": "Yes, a complimentary shuttle runs to and from the airport every 30 minutes from 5:00 AM to 11:00 PM." },
+  { "category": "Smoking", "question": "Is smoking allowed in rooms?", "answer": "No, all rooms and indoor areas are non-smoking. A $250 cleaning fee applies for violations. A designated outdoor smoking area is available." },
+  { "category": "Room Service", "question": "Is room service available?", "answer": "Room service is available daily from 7:00 AM to 10:00 PM." },
+  { "category": "Children", "question": "Are children allowed / is there a kids' policy?", "answer": "Children of all ages are welcome. Kids under 12 stay free when using existing bedding." },
+  { "category": "Contact", "question": "How can I reach the front desk?", "answer": "The front desk is staffed 24/7. Call extension 0 from any in-room phone, or dial the hotel's main line." },
+  { "category": "In-Room Amenities", "question": "Does my room have a hairdryer?", "answer": "Yes, every room is equipped with a hairdryer, usually located in the bathroom or a vanity drawer." },
+  { "category": "In-Room Amenities", "question": "Can I get an iron and ironing board?", "answer": "Yes, an iron and ironing board are available in every room. If yours is missing, request one from the front desk." },
+  { "category": "In-Room Amenities", "question": "Is there a safe in the room?", "answer": "Yes, every room has an in-room safe large enough for a laptop, located in the closet." },
+  { "category": "In-Room Amenities", "question": "Is there a minibar in the room?", "answer": "Yes, all rooms include a stocked minibar. Items consumed are charged to your room automatically." },
+  { "category": "In-Room Amenities", "question": "Can I get extra pillows or blankets?", "answer": "Yes, extra pillows and blankets are available free of charge — just let the front desk or housekeeping know." }
+]

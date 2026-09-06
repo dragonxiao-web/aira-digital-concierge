@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
+const { ipKeyGenerator } = rateLimit;
 const { routeGuestMessage } = require("./src/router");
 const { listTickets, markResolved, findTicket } = require("./src/tickets");
 const { verifySlackSignature } = require("./src/slackVerify");
@@ -54,21 +55,44 @@ app.set("trust proxy", 1);
 
 // /webhook is the one endpoint that costs real money per request (an
 // Anthropic API call every time, sometimes two) and is meant to be public —
-// nothing stops a bot from hammering it otherwise. 20 requests per 5
-// minutes per IP comfortably covers a real guest conversation while
-// capping the blast radius of abuse. Returns the same {answer, answered}
-// shape as every other branch (Section 5) rather than a bare error.
-const webhookLimiter = rateLimit({
+// nothing stops a bot from hammering it otherwise. Two limiters stack here
+// because hotel guests typically share one public IP (hotel WiFi NAT) —
+// limiting by IP alone would mean every guest in the building shares a
+// single budget, and a handful of guests chatting at once could trip a
+// "too many requests" error that has nothing to do with any one of them.
+const webhookLimiterHandler = (req, res) => {
+  res.status(429).json({
+    answer: "You're sending messages a little too quickly — please wait a moment and try again.",
+    answered: false,
+  });
+};
+
+// Per-guest limit: keyed by session_id (stable per guest, set by the widget)
+// rather than IP, so each guest gets their own 20-per-5-minutes budget
+// regardless of how many other guests share the same hotel network.
+const webhookSessionLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  handler: (req, res) => {
-    res.status(429).json({
-      answer: "You're sending messages a little too quickly — please wait a moment and try again.",
-      answered: false,
-    });
-  },
+  keyGenerator: (req, res) =>
+    req.body && typeof req.body.session_id === "string" && req.body.session_id
+      ? `session:${req.body.session_id}`
+      : ipKeyGenerator(req.ip),
+  handler: webhookLimiterHandler,
+});
+
+// Per-network backstop: keyed by IP as normal, with a much higher ceiling
+// since this key now represents a whole hotel's worth of legitimate
+// traffic, not one guest. Catches a genuine flood (e.g. a bot spraying
+// random session_ids to dodge the limiter above) without punishing a busy
+// hotel for having several guests chatting at once.
+const webhookIpLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: webhookLimiterHandler,
 });
 
 // Defense in depth on top of requireStaffAuth: STAFF_API_KEY is a 64-char
@@ -122,7 +146,7 @@ app.use(express.json({ verify: captureRawBody }));
 app.use(express.urlencoded({ extended: false, verify: captureRawBody }));
 app.use(express.static("public"));
 
-app.post("/webhook", webhookLimiter, async (req, res) => {
+app.post("/webhook", webhookIpLimiter, webhookSessionLimiter, async (req, res) => {
   const body = req.body || {};
 
   const guestMessage = typeof body.guest_message === "string" ? body.guest_message.trim() : "";

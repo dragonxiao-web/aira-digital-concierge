@@ -1,13 +1,97 @@
 require("dotenv").config();
 
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const { routeGuestMessage } = require("./src/router");
 const { listTickets, markResolved, findTicket } = require("./src/tickets");
 const { verifySlackSignature } = require("./src/slackVerify");
 const { summaryText } = require("./src/slack");
 
+// Same fail-closed posture as DB_ENCRYPTION_KEY (src/db.js): the staff
+// endpoints below expose guest PII (names, room numbers, message content),
+// so an app that silently ran with auth disabled because this was unset
+// would look secure without being secure.
+const STAFF_API_KEY = process.env.STAFF_API_KEY;
+if (!STAFF_API_KEY || STAFF_API_KEY.length < 32) {
+  throw new Error(
+    "STAFF_API_KEY is not set (or too short). Refusing to start — the /tickets " +
+      "endpoints expose guest PII and must not run unauthenticated. Generate one " +
+      "with `node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"` " +
+      "and set it in .env."
+  );
+}
+
+// Staff-only endpoints require `Authorization: Bearer <STAFF_API_KEY>`.
+// Constant-time comparison so response timing can't be used to guess the key.
+function requireStaffAuth(req, res, next) {
+  const header = req.headers.authorization || "";
+  const [scheme, token] = header.split(" ");
+  if (scheme !== "Bearer" || !token) {
+    return res.status(401).json({ error: "missing or malformed Authorization header" });
+  }
+
+  const provided = Buffer.from(token);
+  const expected = Buffer.from(STAFF_API_KEY);
+  const valid = provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+
+  if (!valid) {
+    return res.status(401).json({ error: "invalid staff API key" });
+  }
+  next();
+}
+
 const app = express();
+
+// Needed for accurate per-IP rate limiting behind a reverse proxy/tunnel
+// (ngrok, or a real load balancer in production) — without this, every
+// request's req.ip resolves to the proxy's address instead of the actual
+// client, so every guest would share one rate-limit bucket. `1` means
+// "trust exactly one hop in front of this app"; adjust if the real
+// deployment topology has more hops between the internet and this process.
+app.set("trust proxy", 1);
+
+// /webhook is the one endpoint that costs real money per request (an
+// Anthropic API call every time, sometimes two) and is meant to be public —
+// nothing stops a bot from hammering it otherwise. 20 requests per 5
+// minutes per IP comfortably covers a real guest conversation while
+// capping the blast radius of abuse. Returns the same {answer, answered}
+// shape as every other branch (Section 5) rather than a bare error.
+const webhookLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(429).json({
+      answer: "You're sending messages a little too quickly — please wait a moment and try again.",
+      answered: false,
+    });
+  },
+});
+
+// Defense in depth on top of requireStaffAuth: STAFF_API_KEY is a 64-char
+// hex string so brute-forcing it is already computationally infeasible,
+// but this still slows/logs repeated failed-auth attempts against these
+// PII-exposing endpoints.
+const staffLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: "too many requests" }),
+});
+
+// Slack requests are already signature-verified (verifySlackSignature) —
+// this is just a backstop against a replay flood, so the limit is generous.
+const slackActionsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).send(""),
+});
 
 // Liveness probe for monitoring tools. Mounted before CORS/body-parsing/
 // everything else, and its handler touches nothing but the process clock —
@@ -38,7 +122,7 @@ app.use(express.json({ verify: captureRawBody }));
 app.use(express.urlencoded({ extended: false, verify: captureRawBody }));
 app.use(express.static("public"));
 
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", webhookLimiter, async (req, res) => {
   const body = req.body || {};
 
   const guestMessage = typeof body.guest_message === "string" ? body.guest_message.trim() : "";
@@ -74,12 +158,13 @@ app.post("/webhook", async (req, res) => {
 
 // Minimal staff-side endpoints — not part of the guest-facing contract,
 // but needed to view tickets and to unlock the "resolved -> can dedupe as
-// new" behavior described in Section 6.
-app.get("/tickets", (req, res) => {
+// new" behavior described in Section 6. Gated by requireStaffAuth since
+// these expose guest names, room numbers, and message content.
+app.get("/tickets", staffLimiter, requireStaffAuth, (req, res) => {
   res.json(listTickets({ status: req.query.status }));
 });
 
-app.post("/tickets/:ticketId/resolve", (req, res) => {
+app.post("/tickets/:ticketId/resolve", staffLimiter, requireStaffAuth, (req, res) => {
   const result = markResolved(req.params.ticketId);
   if (result.changes === 0) {
     return res.status(404).json({ error: "ticket not found" });
@@ -90,7 +175,7 @@ app.post("/tickets/:ticketId/resolve", (req, res) => {
 // Slack calls this when staff click a button on a ticket alert. Must be
 // signature-verified (src/slackVerify.js) since anyone who finds this URL
 // could otherwise resolve tickets or spam the channel.
-app.post("/slack/actions", async (req, res) => {
+app.post("/slack/actions", slackActionsLimiter, async (req, res) => {
   if (!verifySlackSignature(req)) {
     return res.status(401).send("invalid signature");
   }

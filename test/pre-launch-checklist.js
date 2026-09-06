@@ -5,8 +5,11 @@
 //
 // Usage: node test/pre-launch-checklist.js [webhook_url]
 
+require("dotenv").config();
+
 const BASE_URL = (process.argv[2] || "http://localhost:3000").replace(/\/$/, "");
 const WEBHOOK_URL = `${BASE_URL}/webhook`;
+const STAFF_HEADERS = { Authorization: `Bearer ${process.env.STAFF_API_KEY}` };
 
 let pass = 0;
 let fail = 0;
@@ -202,7 +205,7 @@ async function section10_edgeCases() {
     });
     await post(roomlessMsg);
     // Confirm via /tickets that the fallback-extracted room number landed on the ticket
-    const res = await fetch(`${BASE_URL}/tickets`);
+    const res = await fetch(`${BASE_URL}/tickets`, { headers: STAFF_HEADERS });
     const tickets = await res.json();
     const match = tickets.find((t) => t.guest_message === roomlessMsg.guest_message);
     report(
@@ -225,7 +228,13 @@ async function section10_edgeCases() {
 async function section11_logging() {
   console.log("\n-- Section 11: Logging --");
 
-  const res = await fetch(`${BASE_URL}/tickets`);
+  const unauthedRes = await fetch(`${BASE_URL}/tickets`);
+  report("GET /tickets without Authorization header is rejected", unauthedRes.status === 401);
+
+  const wrongKeyRes = await fetch(`${BASE_URL}/tickets`, { headers: { Authorization: "Bearer wrong-key-entirely" } });
+  report("GET /tickets with wrong staff key is rejected", wrongKeyRes.status === 401);
+
+  const res = await fetch(`${BASE_URL}/tickets`, { headers: STAFF_HEADERS });
   const tickets = await res.json();
 
   report("GET /tickets returns an array", Array.isArray(tickets) && tickets.length > 0);

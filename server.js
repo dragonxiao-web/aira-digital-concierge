@@ -9,6 +9,17 @@ const { summaryText } = require("./src/slack");
 
 const app = express();
 
+// Liveness probe for monitoring tools. Mounted before CORS/body-parsing/
+// everything else, and its handler touches nothing but the process clock —
+// no DB, no Anthropic/Slack calls — so it stays reachable even if those are
+// down or the encrypted DB failed to open. (A missing/malformed
+// DB_ENCRYPTION_KEY still prevents the process from starting at all — see
+// src/db.js — but once the process is up, this endpoint can't be dragged
+// down by anything that happens after this line.)
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 // Capture the raw body alongside the parsed one — Slack's signature check
 // (see src/slackVerify.js) has to run over the exact bytes Slack sent,
 // which is gone once a body parser re-serializes it.
@@ -137,8 +148,6 @@ app.post("/slack/actions", async (req, res) => {
     console.error("[slack/actions] failed to update message:", err.message);
   }
 });
-
-app.get("/health", (req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

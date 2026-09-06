@@ -88,7 +88,7 @@ async function section7_failureHandling() {
   {
     const res = await fetch(`${BASE_URL}/health`);
     const body = await res.json();
-    report("server still healthy after bad input", res.status === 200 && body.ok === true);
+    report("server still healthy after bad input", res.status === 200 && body.status === "ok" && typeof body.timestamp === "string");
   }
 
   // Guest name / room number omitted entirely (both optional per contract)

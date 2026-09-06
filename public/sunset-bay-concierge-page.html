@@ -33,29 +33,68 @@
   .header h1 { margin: 0 0 4px; font-size: 20px; font-weight: 700; }
   .header p { margin: 0; font-size: 13px; color: #cfd8d3; line-height: 1.4; }
 
-  .details-toggle {
-    background: transparent;
-    border: none;
-    color: #cfd8d3;
-    font-size: 12px;
-    text-decoration: underline;
-    cursor: pointer;
-    padding: 8px 0 0;
+  /* --- Room gate: blocking overlay shown before any chat is possible --- */
+  .room-gate {
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 53, 43, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 10;
   }
 
-  .details-panel {
-    display: none;
-    gap: 8px;
-    padding-top: 10px;
+  .room-gate-card {
+    background: #f3f0e7;
+    border-radius: 14px;
+    padding: 28px 26px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
   }
-  .details-panel.open { display: flex; flex-wrap: wrap; }
 
-  .details-panel input {
-    flex: 1 1 160px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    border: none;
+  .room-gate-card h2 {
+    margin: 0 0 8px;
+    font-size: 19px;
+    color: #14352b;
+  }
+
+  .room-gate-card p {
+    margin: 0 0 18px;
     font-size: 13px;
+    color: #555;
+    line-height: 1.5;
+  }
+
+  .room-gate-card input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid #ddd7c7;
+    font-size: 14px;
+    margin-bottom: 10px;
+    background: #fff;
+  }
+
+  .room-gate-card input:focus { outline: none; border-color: #14352b; }
+
+  .room-gate-error {
+    color: #b3261e;
+    font-size: 12px;
+    margin: -4px 0 10px;
+  }
+
+  .room-gate-card button {
+    width: 100%;
+    background: #14352b;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   .chat-window {
@@ -188,15 +227,10 @@
 </head>
 <body>
 
-<div class="page">
+<div class="page" id="page" style="display: none;">
   <div class="header">
     <h1>Sunset Bay Hotel — Concierge</h1>
     <p>Ask about your stay, or let us know if you need anything — available anytime.</p>
-    <button class="details-toggle" id="details-toggle" type="button">+ Add your name &amp; room number (optional)</button>
-    <div class="details-panel" id="details-panel">
-      <input type="text" id="guest-name-input" placeholder="Your name">
-      <input type="text" id="room-number-input" placeholder="Room number">
-    </div>
   </div>
 
   <div class="chat-window" id="chat-window"></div>
@@ -204,6 +238,17 @@
   <div class="input-row">
     <input type="text" id="chat-input" placeholder="Ask a question or make a request...">
     <button id="send-button">Send</button>
+  </div>
+</div>
+
+<div class="room-gate" id="room-gate" style="display: none;">
+  <div class="room-gate-card">
+    <h2>Welcome to Sunset Bay Hotel</h2>
+    <p>Please enter your room number so we can help you faster — this is required before you can start chatting.</p>
+    <input type="text" id="guest-name-input" placeholder="Your name (optional)">
+    <input type="text" id="room-number-input" placeholder="Room number">
+    <div class="room-gate-error" id="room-gate-error" style="display: none;">Please enter your room number to continue.</div>
+    <button id="room-gate-submit" type="button">Start Chat</button>
   </div>
 </div>
 
@@ -261,29 +306,59 @@ if (!sessionId) {
 let history = safeGetJSON("concierge_history", []);
 
 // --- DOM ELEMENTS ---
+const page = document.querySelector("#page");
 const chatWindow = document.querySelector("#chat-window");
 const inputField = document.querySelector("#chat-input");
 const sendButton = document.querySelector("#send-button");
-const detailsToggle = document.querySelector("#details-toggle");
-const detailsPanel = document.querySelector("#details-panel");
+const roomGate = document.querySelector("#room-gate");
+const roomGateError = document.querySelector("#room-gate-error");
+const roomGateSubmit = document.querySelector("#room-gate-submit");
 const guestNameInput = document.querySelector("#guest-name-input");
 const roomNumberInput = document.querySelector("#room-number-input");
 
-// Restore optional guest details (also collapsible, non-blocking).
 guestNameInput.value = safeGet("concierge_guest_name") || "";
 roomNumberInput.value = safeGet("concierge_room_number") || "";
-guestNameInput.addEventListener("input", () => safeSet("concierge_guest_name", guestNameInput.value));
-roomNumberInput.addEventListener("input", () => safeSet("concierge_room_number", roomNumberInput.value));
 
-detailsToggle.addEventListener("click", () => {
-  detailsPanel.classList.toggle("open");
+// --- ROOM GATE ---
+// Room number is required before any chatting can happen — this is a
+// blocking gate, not the old optional/collapsible capture. If it's already
+// known from a previous visit (persisted in localStorage), skip straight
+// to chat instead of asking again every time.
+function startChat() {
+  roomGate.style.display = "none";
+  page.style.display = "flex";
+
+  if (history.length === 0) {
+    appendMessage("concierge", "Hello! I'm here to help with any questions or requests during your stay at Sunset Bay Hotel.", {}, false);
+  } else {
+    history.forEach((entry) => appendMessage(entry.role, entry.text, { ticketId: entry.ticketId }, false));
+  }
+}
+
+function submitRoomGate() {
+  const roomNumber = roomNumberInput.value.trim();
+  if (!roomNumber) {
+    roomGateError.style.display = "block";
+    roomNumberInput.focus();
+    return;
+  }
+  safeSet("concierge_guest_name", guestNameInput.value.trim());
+  safeSet("concierge_room_number", roomNumber);
+  startChat();
+}
+
+roomGateSubmit.addEventListener("click", submitRoomGate);
+roomNumberInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") submitRoomGate();
+});
+roomNumberInput.addEventListener("input", () => {
+  if (roomGateError.style.display !== "none") roomGateError.style.display = "none";
 });
 
-// --- RESTORE CONVERSATION HISTORY ---
-if (history.length === 0) {
-  appendMessage("concierge", "Hello! I'm here to help with any questions or requests during your stay at Sunset Bay Hotel.", {}, false);
+if (roomNumberInput.value.trim()) {
+  startChat();
 } else {
-  history.forEach((entry) => appendMessage(entry.role, entry.text, { ticketId: entry.ticketId }, false));
+  roomGate.style.display = "flex";
 }
 
 // --- SEND MESSAGE ---
